@@ -1,6 +1,7 @@
+import re
 from dataclasses import dataclass, asdict
+import keyword
 from typing import Dict, List, Optional
-
 from src.labeling.label_taxonomy import TICKET_TAXONOMY, TICKET_TYPES
 
 
@@ -37,13 +38,37 @@ class RuleBasedTicketLabeler:
         text: str,
         ticket_type: str
     ) -> List[str]:
-        keywords = self.taxonomy[ticket_type]["keywords"]
+        """
+        Match keywords and phrases using word boundaries.
 
-        matches = [
-            keyword
-            for keyword in keywords
-            if keyword.lower() in text
-        ]
+        Multi-word phrases may contain up to two intermediate words.
+        For example, 'card declined' can match:
+        - card declined
+        - card was declined
+        - card keeps getting declined
+        """
+        keywords = self.taxonomy[ticket_type]["keywords"]
+        matches = []
+
+        for keyword in keywords:
+            keyword_words = keyword.lower().split()
+
+            if len(keyword_words) == 1:
+                pattern = rf"(?<!\w){re.escape(keyword_words[0])}(?!\w)"
+
+            else:
+                escaped_words = [
+                    re.escape(word)
+                    for word in keyword_words
+                ]
+
+                separator = r"(?:\W+\w+){0,2}\W+"
+                phrase_pattern = separator.join(escaped_words)
+
+                pattern = rf"(?<!\w){phrase_pattern}(?!\w)"
+
+            if re.search(pattern, text):
+                matches.append(keyword)
 
         return matches
 
@@ -51,18 +76,30 @@ class RuleBasedTicketLabeler:
         self,
         matched_keywords: Dict[str, List[str]]
     ) -> Dict[str, float]:
+        """
+        Assign weighted scores based on matched keyword strength.
+
+        Multi-word phrases receive more weight because they usually
+        represent stronger intent than generic single-word matches.
+        """
         scores = {}
 
         for ticket_type in self.ticket_types:
-            category_keywords = self.taxonomy[ticket_type]["keywords"]
             matches = matched_keywords[ticket_type]
 
-            if not category_keywords:
-                scores[ticket_type] = 0.0
-                continue
+            score = 0.0
 
-            raw_score = len(matches) / len(category_keywords)
-            scores[ticket_type] = round(raw_score, 4)
+            for keyword in matches:
+                word_count = len(keyword.split())
+
+                if word_count >= 3:
+                    score += 3.0
+                elif word_count == 2:
+                    score += 2.0
+                else:
+                    score += 1.0
+
+            scores[ticket_type] = round(score, 4)
 
         return scores
 
@@ -70,20 +107,32 @@ class RuleBasedTicketLabeler:
     def _calculate_confidence(
         category_scores: Dict[str, float]
     ) -> float:
-        sorted_scores = sorted(
+        """
+        Calculate confidence using the top score and separation
+        from the second-ranked category.
+
+        This is a heuristic confidence score, not a calibrated probability.
+        """
+        ranked_scores = sorted(
             category_scores.values(),
             reverse=True
         )
 
-        if not sorted_scores or sorted_scores[0] == 0:
+        if not ranked_scores or ranked_scores[0] == 0:
             return 0.0
 
-        top_score = sorted_scores[0]
-        second_score = sorted_scores[1] if len(sorted_scores) > 1 else 0.0
+        top_score = ranked_scores[0]
+        second_score = ranked_scores[1] if len(ranked_scores) > 1 else 0.0
 
-        margin = top_score - second_score
+        margin = max(top_score - second_score, 0.0)
 
-        confidence = (top_score * 0.7) + (margin * 0.3)
+        top_strength = min(top_score / 3.0, 1.0)
+        margin_strength = min(margin / 2.0, 1.0)
+
+        confidence = (
+            top_strength * 0.65
+            + margin_strength * 0.35
+        )
 
         return round(min(confidence, 1.0), 4)
 

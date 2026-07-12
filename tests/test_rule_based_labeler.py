@@ -11,7 +11,17 @@ def test_billing_prediction():
 
     assert result.suggested_ticket_type == "Billing inquiry"
     assert result.confidence > 0
-    assert "payment" in result.matched_keywords["Billing inquiry"]
+
+    billing_matches = result.matched_keywords["Billing inquiry"]
+
+    assert any(
+        phrase in billing_matches
+        for phrase in [
+            "payment was declined",
+            "transaction failed",
+            "card transaction failed",
+        ]
+    )
 
 
 def test_cancellation_prediction():

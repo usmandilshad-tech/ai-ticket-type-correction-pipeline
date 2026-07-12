@@ -2,21 +2,22 @@ from pathlib import Path
 
 import pandas as pd
 
-from src.labeling.kb_similarity_labeler import KBSimilarityLabeler
-from src.labeling.rule_based_labeler import RuleBasedTicketLabeler
+from src.labeling.label_ensemble import TicketLabelEnsemble
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
 INPUT_PATH = (
     PROJECT_ROOT
     / "data"
     / "processed"
     / "cleaned_support_tickets.csv"
 )
+
 OUTPUT_PATH = (
     PROJECT_ROOT
     / "outputs"
-    / "combined_label_suggestions.csv"
+    / "ensemble_label_suggestions.csv"
 )
 
 
@@ -41,59 +42,44 @@ def process_tickets() -> None:
             f"Missing required columns: {sorted(missing_columns)}"
         )
 
-    rule_labeler = RuleBasedTicketLabeler()
-    kb_labeler = KBSimilarityLabeler()
+    ensemble = TicketLabelEnsemble()
 
-    ticket_texts = df["ticket_text"].fillna("").astype(str)
+    predictions = []
 
-    print("Generating rule-based suggestions...")
-    rule_results = ticket_texts.apply(rule_labeler.predict)
+    total = len(df)
 
-    print("Generating knowledge-base similarity suggestions...")
-    kb_results = ticket_texts.apply(kb_labeler.predict)
+    for index, row in df.iterrows():
+        prediction = ensemble.predict(
+            ticket_text=str(row["ticket_text"] or ""),
+            original_ticket_type=row["ticket_type"],
+        )
 
-    df["suggested_ticket_type_rule"] = rule_results.apply(
-        lambda result: result.suggested_ticket_type
-    )
-    df["rule_confidence"] = rule_results.apply(
-        lambda result: result.confidence
-    )
-    df["rule_explanation"] = rule_results.apply(
-        lambda result: result.explanation
-    )
+        predictions.append(prediction.to_dict())
 
-    df["suggested_ticket_type_kb"] = kb_results.apply(
-        lambda result: result.suggested_ticket_type
-    )
-    df["kb_confidence"] = kb_results.apply(
-        lambda result: result.confidence
-    )
-    df["kb_explanation"] = kb_results.apply(
-        lambda result: result.explanation
-    )
+        if (index + 1) % 250 == 0:
+            print(
+                f"Processed {index + 1:,} of {total:,} tickets...",
+                flush=True,
+            )
 
-    df["labelers_agree"] = (
-        df["suggested_ticket_type_rule"]
-        == df["suggested_ticket_type_kb"]
+    prediction_df = pd.DataFrame(predictions)
+
+    result_df = pd.concat(
+        [
+            df[[
+                "ticket_id",
+                "ticket_type",
+                "ticket_text",
+            ]].reset_index(drop=True),
+            prediction_df.reset_index(drop=True),
+        ],
+        axis=1,
     )
 
-    df["rule_matches_original"] = (
-        df["ticket_type"]
-        == df["suggested_ticket_type_rule"]
-    )
-
-    df["kb_matches_original"] = (
-        df["ticket_type"]
-        == df["suggested_ticket_type_kb"]
-    )
-
-    df["review_required"] = (
-        df["suggested_ticket_type_rule"].isna()
-        | (~df["labelers_agree"])
-        | (df["rule_confidence"] < 0.20)
-        | (df["kb_confidence"] < 0.35)
-        | (~df["rule_matches_original"])
-        | (~df["kb_matches_original"])
+    result_df = result_df.rename(
+        columns={
+            "ticket_type": "source_ticket_type",
+        }
     )
 
     OUTPUT_PATH.parent.mkdir(
@@ -101,55 +87,42 @@ def process_tickets() -> None:
         exist_ok=True,
     )
 
-    output_columns = [
-        "ticket_id",
-        "ticket_type",
-        "suggested_ticket_type_rule",
-        "rule_confidence",
-        "suggested_ticket_type_kb",
-        "kb_confidence",
-        "labelers_agree",
-        "rule_matches_original",
-        "kb_matches_original",
-        "review_required",
-        "rule_explanation",
-        "kb_explanation",
-        "ticket_text",
-    ]
-
-    df[output_columns].to_csv(
+    result_df.to_csv(
         OUTPUT_PATH,
         index=False,
     )
 
-    print("\nProcessing Summary")
-    print("=" * 60)
-    print(f"Total tickets: {len(df)}")
+    print("\nEnsemble Processing Summary")
+    print("=" * 70)
+    print(f"Total tickets: {len(result_df):,}")
+
+    print("\nDecision status:")
     print(
-        "Rule suggestions generated:",
-        df["suggested_ticket_type_rule"].notna().sum(),
+        result_df["decision_status"]
+        .value_counts(dropna=False)
+        .to_string()
     )
+
+    print("\nReview priority:")
     print(
-        "KB suggestions generated:",
-        df["suggested_ticket_type_kb"].notna().sum(),
+        result_df["review_priority"]
+        .value_counts(dropna=False)
+        .to_string()
     )
+
     print(
-        "Labeler agreements:",
-        df["labelers_agree"].sum(),
+        "\nOriginal label mismatches:",
+        int(result_df["original_label_mismatch"].sum()),
     )
+
+    print("\nFinal suggested ticket types:")
     print(
-        "Rule matches original:",
-        df["rule_matches_original"].sum(),
+        result_df["final_suggested_ticket_type"]
+        .value_counts(dropna=False)
+        .to_string()
     )
-    print(
-        "KB matches original:",
-        df["kb_matches_original"].sum(),
-    )
-    print(
-        "Tickets requiring review:",
-        df["review_required"].sum(),
-    )
-    print(f"Output saved to: {OUTPUT_PATH}")
+
+    print(f"\nOutput saved to: {OUTPUT_PATH}")
 
 
 if __name__ == "__main__":
