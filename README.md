@@ -81,7 +81,7 @@ Improved Routing Model
 
 Project setup and reusable component migration are in progress.
 
-## Architecture ## Related Project
+## Related Project
 
 This project extends:
 
