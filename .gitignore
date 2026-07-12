@@ -1,0 +1,44 @@
+# Environment
+.env
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Data
+data/raw/*
+data/processed/*
+data/reviewed/*
+
+# Preserve folder structure
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/reviewed/.gitkeep
+
+# Models and generated outputs
+models/*
+outputs/*
+vector_store/*
+*.joblib
+*.pkl
+
+# Preserve folders
+!models/.gitkeep
+!outputs/.gitkeep
+
+# IDE and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+#Full Data files to ignore
+data/processed/cleaned_support_tickets.csv
