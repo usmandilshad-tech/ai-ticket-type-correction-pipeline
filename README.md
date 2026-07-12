@@ -76,17 +76,17 @@ Clean Training Dataset
       ↓
 Improved Routing Model
 
-Project Status
+## Project Status
 
 Project setup and reusable component migration are in progress.
 
-Related Project
+## Related Project
 
 This project extends:
 
 AI Support Copilot with RAG  https://github.com/usmandilshad-tech/ai-support-copilot-rag 
 
-Author
+## Author
 
 Muhammad Usman Dilshad
 
