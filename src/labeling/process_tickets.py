@@ -2,12 +2,22 @@ from pathlib import Path
 
 import pandas as pd
 
+from src.labeling.kb_similarity_labeler import KBSimilarityLabeler
 from src.labeling.rule_based_labeler import RuleBasedTicketLabeler
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-INPUT_PATH = PROJECT_ROOT / "data" / "processed" / "cleaned_support_tickets.csv"
-OUTPUT_PATH = PROJECT_ROOT / "outputs" / "rule_based_label_suggestions.csv"
+INPUT_PATH = (
+    PROJECT_ROOT
+    / "data"
+    / "processed"
+    / "cleaned_support_tickets.csv"
+)
+OUTPUT_PATH = (
+    PROJECT_ROOT
+    / "outputs"
+    / "combined_label_suggestions.csv"
+)
 
 
 def process_tickets() -> None:
@@ -21,7 +31,7 @@ def process_tickets() -> None:
     required_columns = {
         "ticket_id",
         "ticket_type",
-        "ticket_text"
+        "ticket_text",
     }
 
     missing_columns = required_columns - set(df.columns)
@@ -31,62 +41,113 @@ def process_tickets() -> None:
             f"Missing required columns: {sorted(missing_columns)}"
         )
 
-    labeler = RuleBasedTicketLabeler()
+    rule_labeler = RuleBasedTicketLabeler()
+    kb_labeler = KBSimilarityLabeler()
 
-    results = df["ticket_text"].fillna("").apply(labeler.predict)
+    ticket_texts = df["ticket_text"].fillna("").astype(str)
 
-    df["suggested_ticket_type_rule"] = results.apply(
+    print("Generating rule-based suggestions...")
+    rule_results = ticket_texts.apply(rule_labeler.predict)
+
+    print("Generating knowledge-base similarity suggestions...")
+    kb_results = ticket_texts.apply(kb_labeler.predict)
+
+    df["suggested_ticket_type_rule"] = rule_results.apply(
         lambda result: result.suggested_ticket_type
     )
-
-    df["rule_confidence"] = results.apply(
+    df["rule_confidence"] = rule_results.apply(
         lambda result: result.confidence
     )
-
-    df["rule_explanation"] = results.apply(
+    df["rule_explanation"] = rule_results.apply(
         lambda result: result.explanation
     )
 
-    df["rule_label_matches_original"] = (
-        df["ticket_type"] == df["suggested_ticket_type_rule"]
+    df["suggested_ticket_type_kb"] = kb_results.apply(
+        lambda result: result.suggested_ticket_type
+    )
+    df["kb_confidence"] = kb_results.apply(
+        lambda result: result.confidence
+    )
+    df["kb_explanation"] = kb_results.apply(
+        lambda result: result.explanation
     )
 
-    df["rule_review_required"] = (
+    df["labelers_agree"] = (
+        df["suggested_ticket_type_rule"]
+        == df["suggested_ticket_type_kb"]
+    )
+
+    df["rule_matches_original"] = (
+        df["ticket_type"]
+        == df["suggested_ticket_type_rule"]
+    )
+
+    df["kb_matches_original"] = (
+        df["ticket_type"]
+        == df["suggested_ticket_type_kb"]
+    )
+
+    df["review_required"] = (
         df["suggested_ticket_type_rule"].isna()
-        | (df["rule_confidence"] < 0.25)
-        | (~df["rule_label_matches_original"])
+        | (~df["labelers_agree"])
+        | (df["rule_confidence"] < 0.20)
+        | (df["kb_confidence"] < 0.35)
+        | (~df["rule_matches_original"])
+        | (~df["kb_matches_original"])
     )
 
-    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    OUTPUT_PATH.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
 
     output_columns = [
         "ticket_id",
         "ticket_type",
         "suggested_ticket_type_rule",
         "rule_confidence",
-        "rule_label_matches_original",
-        "rule_review_required",
+        "suggested_ticket_type_kb",
+        "kb_confidence",
+        "labelers_agree",
+        "rule_matches_original",
+        "kb_matches_original",
+        "review_required",
         "rule_explanation",
-        "ticket_text"
+        "kb_explanation",
+        "ticket_text",
     ]
 
     df[output_columns].to_csv(
         OUTPUT_PATH,
-        index=False
+        index=False,
     )
 
-    print(f"Processed tickets: {len(df)}")
+    print("\nProcessing Summary")
+    print("=" * 60)
+    print(f"Total tickets: {len(df)}")
     print(
-        "Suggested labels generated:",
-        df["suggested_ticket_type_rule"].notna().sum()
+        "Rule suggestions generated:",
+        df["suggested_ticket_type_rule"].notna().sum(),
     )
     print(
-        "Labels matching original:",
-        df["rule_label_matches_original"].sum()
+        "KB suggestions generated:",
+        df["suggested_ticket_type_kb"].notna().sum(),
+    )
+    print(
+        "Labeler agreements:",
+        df["labelers_agree"].sum(),
+    )
+    print(
+        "Rule matches original:",
+        df["rule_matches_original"].sum(),
+    )
+    print(
+        "KB matches original:",
+        df["kb_matches_original"].sum(),
     )
     print(
         "Tickets requiring review:",
-        df["rule_review_required"].sum()
+        df["review_required"].sum(),
     )
     print(f"Output saved to: {OUTPUT_PATH}")
 
