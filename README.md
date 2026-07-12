@@ -76,11 +76,12 @@ Clean Training Dataset
       ↓
 Improved Routing Model
 
+```
 ## Project Status
 
 Project setup and reusable component migration are in progress.
 
-## Related Project
+## Architecture ## Related Project
 
 This project extends:
 
